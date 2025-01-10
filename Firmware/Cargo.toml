@@ -45,7 +45,7 @@ panic-halt = "0.2.0"
 chrono = { version = "0.4.31", default-features = false }
 
 [features]
-default = ["ble", "embassy"]
+default = ["ble", "embassy", "power_measure"]
 embassy = ["dep:embassy-sync"]
 ble = []
 power_measure = []
