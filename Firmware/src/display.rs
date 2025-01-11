@@ -337,7 +337,7 @@ impl<'d> Display<'d> {
                 &mut *self.u8g2.borrow_mut(),
                 x,
                 y,
-                str_.as_ptr() as *const u8,
+                str_.as_ptr(),
             );
         }
     }

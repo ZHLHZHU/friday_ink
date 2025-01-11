@@ -11,7 +11,7 @@ use ch58x_hal::{println, uart::{UartTx, UartRx, Config as UartConfig}};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use friday_rs::bluetooth::{observer_task, observer_task_init, observer_timeout_task};
-// use friday_rs::display::{u8x8_byte_ch582f_hw_spi, u8x8_gpio_and_delay_ch582f, Display, DriverIC};
+use friday_rs::display::{u8x8_byte_ch582f_hw_spi, u8x8_gpio_and_delay_ch582f, Display, DriverIC};
 use friday_rs::rtc::set_default_rtc;
 use friday_rs::softwire::SoftwareI2C;
 use friday_rs::{config, power, rtc};
@@ -56,15 +56,14 @@ async fn main(spawner: Spawner) -> ! {
     config.clock.use_pll_48mhz().enable_lse();
     let p = ch58x_hal::init(config);
     ch58x_hal::embassy::init();
-    
+
     // 配置UART发送和接收
     let uart_config = UartConfig {
         baudrate: 115200,
         ..Default::default()
     };
     let uart_tx = UartTx::new(p.UART1, p.PA9, uart_config).unwrap();
-    let uart_rx = UartRx::new(p.UART1, p.PA8, uart_config).unwrap();
-    
+
     unsafe {
         ch58x_hal::set_default_serial(uart_tx);
     }
@@ -86,11 +85,11 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     // // 按需选择屏幕驱动
-    // let mut display = Display::new(
-    //     DriverIC::SSD1607,
-    //     Some(u8x8_byte_ch582f_hw_spi),
-    //     Some(u8x8_gpio_and_delay_ch582f),
-    // );
+    let mut display = Display::new(
+        DriverIC::SSD1607,
+        Some(u8x8_byte_ch582f_hw_spi),
+        Some(u8x8_gpio_and_delay_ch582f),
+    );
 
     // display.init();
     // display.set_power_save(false);
@@ -130,16 +129,16 @@ async fn main(spawner: Spawner) -> ! {
     let now = rtc.now().unwrap();
     println!("Boot Mode: {:?} @ {:?}", boot_mode, now);
 
-    // match boot_mode {
-    //     FridayMode::TimePair => {
-    //         println!("FridayMode::TimePair @ {:?}", now);
-    //         display.embassy_logo();
-    //     }
-    //     FridayMode::Normal => {
-    //         println!("FridayMode::Normal @ {:?}", now);
-    //         display.is_friday(now);
-    //     }
-    // }
+    match boot_mode {
+        FridayMode::TimePair => {
+            println!("FridayMode::TimePair @ {:?}", now);
+            // display.embassy_logo();
+        }
+        FridayMode::Normal => {
+            println!("FridayMode::Normal @ {:?}", now);
+            display.is_friday(now);
+        }
+    }
     // waiting for epd draw done.
     // ch58x_hal::delay_ms(5000u16);
     // display.set_power_save(true);
@@ -151,21 +150,9 @@ async fn main(spawner: Spawner) -> ! {
             power::low_power_shutdown(0);
         }
         _ => {
-            // 启动蓝牙任务
             observer_task_init();
             let _ = spawner.spawn(observer_timeout_task());
             let _ = spawner.spawn(observer_task());
-            
-            // 启动UART命令处理任务
-            let _ = spawner.spawn(uart_command_task(uart_rx));
-            
-            // 主循环继续处理蓝牙事件
-            loop {
-                Timer::after(Duration::from_micros(300)).await;
-                unsafe {
-                    TMOS_SystemProcess();
-                }
-            }
         }
     }
 
@@ -174,57 +161,5 @@ async fn main(spawner: Spawner) -> ! {
         unsafe {
             TMOS_SystemProcess();
         }
-    }
-}
-
-#[embassy_executor::task]
-async fn uart_command_task(mut uart_rx: UartRx) {
-    let mut buffer = [0u8; 64];
-    let mut pos = 0;
-    
-    println!("UART command mode started");
-    println!("Command format: set_time YYYY-MM-DD HH:mm:ss");
-    
-    loop {
-        if let Ok(byte) = uart_rx.read() {
-            if byte == b'\n' || byte == b'\r' {
-                if pos > 0 {
-                    let cmd = core::str::from_utf8(&buffer[..pos]).unwrap_or("");
-                    if cmd.starts_with("set_time ") {
-                        let parts: &str = &cmd[9..];
-                        if let Some((date, time)) = parts.split_once(' ') {
-                            if let (Some(year), Some(month), Some(day)) = (
-                                date[0..4].parse::<u16>().ok(),
-                                date[5..7].parse::<u8>().ok(),
-                                date[8..10].parse::<u8>().ok(),
-                            ) {
-                                if let (Some(hour), Some(minute), Some(second)) = (
-                                    time[0..2].parse::<u8>().ok(),
-                                    time[3..5].parse::<u8>().ok(),
-                                    time[6..8].parse::<u8>().ok(),
-                                ) {
-                                    let rtc = rtc::take();
-                                    rtc.set_time(rtc::Time {
-                                        year: (year - 2000) as u8,
-                                        month,
-                                        day,
-                                        hour,
-                                        minute,
-                                        second,
-                                        week: 0, // 自动计算星期
-                                    }).unwrap();
-                                    println!("Time set successfully!");
-                                }
-                            }
-                        }
-                    }
-                    pos = 0;
-                }
-            } else if pos < buffer.len() {
-                buffer[pos] = byte;
-                pos += 1;
-            }
-        }
-        Timer::after(Duration::from_millis(10)).await;
     }
 }
